@@ -1,0 +1,180 @@
+{
+    "contentVersion": "1.0.0.0",
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "parameters": {
+      "storageAccountName": {
+        "type": "string",
+        "metadata": {
+          "description": "Name of the Azure storage account to copy to"
+        }
+      },
+      "storageAccountKey": {
+        "type": "securestring",
+        "metadata": {
+          "description": "Key for the Azure storage account."
+        }
+      },
+      "targetBlobContainer": {
+        "type": "string",
+        "metadata": {
+          "description": "Name of the blob container in the Azure Storage account."
+        }
+      },
+      "accessKeyId": {
+        "type": "string",
+        "metadata": {
+          "description": "access key to AWS S3"
+        }
+      },      
+      "secretAccessKey": {
+        "type": "securestring",
+        "metadata": {
+          "description": "secret access key for AWS S3"
+        }
+      },
+	  "bucketName" : {
+		"type" : "string",
+		"metadata" : {
+			"description" : "AWS S3 bucket to copy from"
+		}
+	  }	  
+    }	,
+    "variables": {
+      "dataFactoryName": "[concat('AWSToAzureBlobFD', uniqueString(resourceGroup().id))]",
+      "awsLinkedServiceName": "awsLinkedService",
+      "azureStorageLinkedServiceName": "AzureStorageLinkedService",
+      "blobOutputDatasetName": "BlobOutputDataset",
+      "awsInputDatasetName": "awsInputDataset",
+      "pipelineName": "AWS2BlobPipeline"
+    },
+    "resources": [
+      {
+        "name": "[variables('dataFactoryName')]",
+        "apiVersion": "2015-10-01",
+        "type": "Microsoft.DataFactory/datafactories",
+        "location": "West US",
+        "resources": [
+          {
+            "type": "linkedservices",
+            "name": "[variables('azureStorageLinkedServiceName')]",
+            "dependsOn": [
+              "[variables('dataFactoryName')]"
+            ],
+            "apiVersion": "2015-10-01",
+            "properties": {
+              "type": "AzureStorage",
+              "description": "Azure Storage linked service",
+              "typeProperties": {
+                "connectionString": "[concat('DefaultEndpointsProtocol=https;AccountName=',parameters('storageAccountName'),';AccountKey=',parameters('storageAccountKey'))]"
+              }
+            }
+          },
+          {
+            "type": "linkedservices",
+            "name": "[variables('awsLinkedServiceName')]",
+            "dependsOn": [
+              "[variables('dataFactoryName')]"
+            ],
+            "apiVersion": "2015-10-01",
+            "properties": {
+              "type": "AwsAccessKey",
+              "description": "AWS access key linked service",
+              "typeProperties": {
+                "accessKeyId": "[parameters('accessKeyId')]",
+				"secretAccessKey" : "[parameters('secretAccessKey')]"
+              }
+            }
+          },
+          {
+            "type": "datasets",
+            "name": "[variables('blobOutputDatasetName')]",
+            "dependsOn": [
+              "[variables('dataFactoryName')]",
+              "[variables('azureStorageLinkedServiceName')]"
+            ],
+            "apiVersion": "2015-10-01",
+            "properties": {
+              "type": "AzureBlob",
+              "linkedServiceName": "[variables('azureStorageLinkedServiceName')]",              
+              "typeProperties": {
+                "folderPath": "[parameters('targetBlobContainer')]"               
+              },
+              "availability": {
+                "frequency": "Hour",
+                "interval": 1
+              }              
+            }
+          },
+          {
+            "type": "datasets",
+            "name": "[variables('awsInputDatasetName')]",
+            "dependsOn": [
+              "[variables('dataFactoryName')]",
+              "[variables('awsLinkedServiceName')]"
+            ],
+            "apiVersion": "2015-10-01",
+            "properties": {
+              "type": "AmazonS3",
+              "linkedServiceName": "[variables('awsLinkedServiceName')]",              
+              "typeProperties": {
+                "bucketName": "[parameters('bucketName')]",
+				"key": ""
+              },
+              "availability": {
+                "frequency": "Hour",
+                "interval": 1
+              },
+			   "external": true
+            }
+          },
+          {
+            "type": "datapipelines",
+            "name": "[variables('pipelineName')]",
+            "dependsOn": [
+              "[variables('dataFactoryName')]",
+              "[variables('azureStorageLinkedServiceName')]",
+              "[variables('awsLinkedServiceName')]",
+              "[variables('awsInputDatasetName')]",
+              "[variables('blobOutputDatasetName')]"
+            ],
+            "apiVersion": "2015-10-01",
+            "properties": {
+              "activities": [
+                {
+                  "name": "CopyAmazonS3ToBlob",
+                  "description": "pipeline for copy activity",
+                  "type": "Copy",
+                  "inputs": [
+                    {
+                      "name": "[variables('awsInputDatasetName')]"
+                    }
+                  ],
+                  "outputs": [
+                    {
+                      "name": "[variables('blobOutputDatasetName')]"
+                    }
+                  ],
+                  "typeProperties": {
+                    "source": {
+                      "type": "FileSystemSource",
+					  "recursive": false
+                    },
+                    "sink": {
+                      "type": "BlobSink",
+                        "writeBatchSize": 0,
+                        "writeBatchTimeout": "00:00:00"
+                    }                    
+                  },
+                  "Policy": {
+                    "timeout": "01:00:00",
+                    "concurrency": 1
+                  }
+                }
+              ],
+              "pipelineMode": "OneTime"
+            }
+          }
+        ]
+      }
+    ]
+  }
